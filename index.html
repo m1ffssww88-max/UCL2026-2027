@@ -315,8 +315,11 @@ const sSave=()=>localStorage.setItem(SES,ses);
 const $=id=>document.getElementById(id);
 const esc=s=>String(s==null?'':s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 const norm=s=>String(s||'').trim().toLowerCase();
-async function loadState(){try{const r=await fetch(DB_URL);const d=await r.json();if(d){S=d}else{S=DEF;await sync()}}catch(e){$('app').innerHTML='<div id="load">تعذر الاتصال بالسحابة<br><span style="font-weight:400;font-size:12px">تحقق من رابط DB_URL في الكود — أنشئ Realtime Database في Firebase وضعها test mode</span></div>';throw e}}
-async function sync(){await fetch(DB_URL,{method:'PUT',body:JSON.stringify(S)})}
+function fetchTimeout(url,opts,ms){opts=opts||{};ms=ms||10000;const ctrl=new AbortController();const t=setTimeout(()=>ctrl.abort(),ms);return fetch(url,Object.assign({},opts,{cache:'no-store',signal:ctrl.signal})).finally(()=>clearTimeout(t))}
+async function loadState(){try{const r=await fetchTimeout(DB_URL,{},10000);const d=await r.json();if(d){S=d}else{S=DEF;await sync()}}catch(e){
+ $('app').innerHTML='<div id="load">تعذّر الاتصال بالسحابة (انتهت مهلة الاتصال أو لا يوجد إنترنت)<br><span style="font-weight:400;font-size:12px">تحقق من اتصال الإنترنت، أو أن المتصفح/إضافة لا تحجب firebaseio.com، ثم أعد المحاولة</span><br><button class="btn sm" style="margin-top:14px" onclick="location.reload(true)">إعادة المحاولة</button></div>';
+ throw e}}
+async function sync(){try{await fetchTimeout(DB_URL,{method:'PUT',body:JSON.stringify(S)},10000)}catch(e){toast('تعذّر الحفظ على السحابة — تحقق من الإنترنت وحاول مجدداً')}}
 function toast(m){const t=document.createElement('div');t.className='toast';t.textContent=m;document.body.appendChild(t);setTimeout(()=>t.remove(),2400)}
 function crest(k,size){size=size||40;const t=TEAMS[k]||{s:'?',c1:'#444',c2:'#222',tx:'#fff'};
  return '<svg width="'+size+'" height="'+size+'" viewBox="0 0 48 48" style="flex-shrink:0;filter:drop-shadow(0 2px 5px rgba(0,0,0,.45))"><path d="M24 2.5 L43.5 8.5 V24 C43.5 35.5 35.8 42.8 24 45.8 C12.2 42.8 4.5 35.5 4.5 24 V8.5 Z" fill="'+t.c2+'" stroke="rgba(255,255,255,.28)" stroke-width="1.4"/><path d="M24 2.5 L43.5 8.5 V24 C43.5 30 41.4 35.3 37.7 39.2 L24 33 Z" fill="'+t.c1+'"/><text x="24" y="27.5" text-anchor="middle" font-size="10.5" font-weight="900" fill="'+t.tx+'" font-family="Cairo,sans-serif">'+t.s+'</text></svg>'}
@@ -339,8 +342,9 @@ const board=()=>Object.keys(S.members).map(c=>{const m=S.members[c];return{c,nam
 function spent(m){return (m.squad||[]).reduce((s,sl)=>s+sl.buy,0)}
 function squadVal(m){return (m.squad||[]).reduce((s,sl)=>s+(S.players[sl.pid]?S.players[sl.pid].price:0),0)}
 /* ============ دخول ============ */
-function adminLogin(){const v=$('acode').value.trim();if(v===S.ownerCode){ses='OWNER';sSave();render();toast('أهلاً بالمالك')}else{$('aerr').textContent='كود الإدارة غير صحيح'}}
-function memberLogin(){const v=$('mcode').value.trim();
+function adminLogin(){const v=$('acode').value.trim();if(v.toUpperCase()===String(S.ownerCode).toUpperCase()){ses='OWNER';sSave();render();toast('أهلاً بالمالك')}else{$('aerr').textContent='كود الإدارة غير صحيح'}}
+function memberLogin(){let v=$('mcode').value.trim();
+ if(!S.members[v]&&!S.unused.includes(v)){const up=v.toUpperCase();if(S.members[up]||S.unused.includes(up))v=up}
  if(S.members[v]){ses=v;sSave();render();toast('أهلاً '+S.members[v].name)}
  else if(S.unused.includes(v)){ses='REG:'+v;sSave();render()}
  else $('merr').textContent='الكود غير صحيح أو غير مفعّل — اطلب كوداً جديداً من المالك'}
@@ -356,10 +360,10 @@ function bindFav(){document.querySelectorAll('.fav').forEach(l=>l.addEventListen
 /* ============ عرض: الدخول والتسجيل ============ */
 function viewLogin(){return '<div class="hero"><div class="ball"></div><h1>دوري توقعات أبطال أوروبا</h1><p>موسم 2026/27 · توقعات · فانتزي · منافسة حتى الجولة الأخيرة</p></div>'
  +'<div class="glass login-box"><h3>لوحة الإدارة</h3><div class="mut" style="margin-bottom:10px">للمالك فقط: إصدار الأكواد، إدخال النتائج، إدارة الفانتزي</div>'
- +'<div class="row"><input id="acode" class="inp code-inp" placeholder="ADMIN-XXXX" onkeydown="if(event.keyCode===13)adminLogin()"><button class="btn" onclick="adminLogin()">دخول</button></div>'
+ +'<div class="row"><input id="acode" class="inp code-inp" placeholder="ADMIN-XXXX" enterkeyhint="done" autocomplete="off" autocapitalize="characters" onkeyup="if(event.key===\'Enter\')adminLogin()"><button class="btn" onclick="adminLogin()">دخول</button></div>'
  +'<div id="aerr" style="color:var(--red);font-size:12px;min-height:16px;margin-top:5px"></div></div>'
  +'<div class="glass login-box"><h3>دخول المنافسين</h3><div class="mut" style="margin-bottom:10px">أدخل كود العضوية الذي أرسله لك المالك</div>'
- +'<div class="row"><input id="mcode" class="inp code-inp" placeholder="UCL-XXXXX" onkeydown="if(event.keyCode===13)memberLogin()"><button class="btn green" onclick="memberLogin()">دخول</button></div>'
+ +'<div class="row"><input id="mcode" class="inp code-inp" placeholder="UCL-XXXXX" enterkeyhint="done" autocomplete="off" autocapitalize="characters" onkeyup="if(event.key===\'Enter\')memberLogin()"><button class="btn green" onclick="memberLogin()">دخول</button></div>'
  +'<div id="merr" style="color:var(--red);font-size:12px;min-height:16px;margin-top:5px"></div></div>'}
 function viewReg(code){return '<div class="hero"><div class="ball"></div><h1>تفعيل العضوية</h1><p>الكود <span class="mono" style="color:var(--gold)">'+esc(code)+'</span> جاهز — أكمل ملفك</p></div>'
  +'<div class="glass login-box"><h3>1 · اسمك في الدوري</h3><input id="rname" class="inp" placeholder="مثال: أبو صلاح" style="margin:8px 0"></div>'
