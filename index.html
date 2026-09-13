@@ -90,9 +90,28 @@ h3.sec::before{content:'';width:4px;height:16px;border-radius:4px;background:lin
 </head>
 <body>
 <div id="app"><div id="load">⚽ جارِ تحميل الدوري...</div></div>
+
+<!-- ============ Firebase (Firestore بدل Realtime Database) ============ -->
+<script src="https://www.gstatic.com/firebasejs/10.13.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.13.2/firebase-firestore-compat.js"></script>
 <script>
-/* ====== الإعداد: ضع رابط Firebase Realtime Database هنا ====== */
-const DB_URL='https://ucl-2026-c3559-default-rtdb.firebaseio.com/ucl26/state.json';
+/* ====== الإعداد: انسخ إعدادات مشروعك من Firebase Console → Project settings → عام → Your apps ======
+   لازم أيضاً تفعّل Cloud Firestore من قسم Build في Firebase Console (Create database → test mode).
+   السبب: كثير شبكات/شركات موبايل بالعراق تحجب نطاق firebaseio.com (Realtime Database) لأنه
+   يُستخدم كثير بمواقع تصيّد، لكنها لا تحجب firestore.googleapis.com (نفس الشركة، خدمة مختلفة). */
+const firebaseConfig = {
+  apiKey: "AIzaSyD1kDi78B7qnylP4f_2LzoGYZkyKWFA-3I",
+  authDomain: "ucl-2026-c3559.firebaseapp.com",
+  projectId: "ucl-2026-c3559",
+  storageBucket: "ucl-2026-c3559.firebasestorage.app",
+  messagingSenderId: "82391663338",
+  appId: "1:82391663338:web:e91d2efa8e631e60214d93"
+};
+firebase.initializeApp(firebaseConfig);
+const _db = firebase.firestore();
+function withTimeout(promise,ms){return Promise.race([promise,new Promise((_,rej)=>setTimeout(()=>rej(new Error('timeout')),ms))])}
+</script>
+<script>
 const SES='ucl26_ses';
 const TDATA=[
 ["RMA","ريال مدريد","RMA","#f4f4f4","#d4a017","#1a1a2e"],
@@ -315,11 +334,14 @@ const sSave=()=>localStorage.setItem(SES,ses);
 const $=id=>document.getElementById(id);
 const esc=s=>String(s==null?'':s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 const norm=s=>String(s||'').trim().toLowerCase();
-function fetchTimeout(url,opts,ms){opts=opts||{};ms=ms||10000;const ctrl=new AbortController();const t=setTimeout(()=>ctrl.abort(),ms);return fetch(url,Object.assign({},opts,{cache:'no-store',signal:ctrl.signal})).finally(()=>clearTimeout(t))}
-async function loadState(){try{const r=await fetchTimeout(DB_URL,{},10000);const d=await r.json();if(d){S=d}else{S=DEF;await sync()}}catch(e){
- $('app').innerHTML='<div id="load">تعذّر الاتصال بالسحابة (انتهت مهلة الاتصال أو لا يوجد إنترنت)<br><span style="font-weight:400;font-size:12px">تحقق من اتصال الإنترنت، أو أن المتصفح/إضافة لا تحجب firebaseio.com، ثم أعد المحاولة</span><br><button class="btn sm" style="margin-top:14px" onclick="location.reload(true)">إعادة المحاولة</button></div>';
- throw e}}
-async function sync(){try{await fetchTimeout(DB_URL,{method:'PUT',body:JSON.stringify(S)},10000)}catch(e){toast('تعذّر الحفظ على السحابة — تحقق من الإنترنت وحاول مجدداً')}}
+async function loadState(){
+ try{
+  const snap=await withTimeout(_db.collection('ucl26').doc('state').get(),12000);
+  if(snap.exists){S=snap.data()}else{S=DEF;await sync()}
+ }catch(e){
+  $('app').innerHTML='<div id="load">تعذّر الاتصال بقاعدة البيانات<br><span style="font-weight:400;font-size:12px">تأكد من: 1) اتصال الإنترنت، 2) أنك فعّلت Cloud Firestore بمشروع Firebase، 3) أنك وضعت إعدادات firebaseConfig الصحيحة بالكود</span><br><button class="btn sm" style="margin-top:14px" onclick="location.reload(true)">إعادة المحاولة</button></div>';
+  throw e}}
+async function sync(){try{await withTimeout(_db.collection('ucl26').doc('state').set(S),12000)}catch(e){toast('تعذّر الحفظ على السحابة — تحقق من الإنترنت وحاول مجدداً')}}
 function toast(m){const t=document.createElement('div');t.className='toast';t.textContent=m;document.body.appendChild(t);setTimeout(()=>t.remove(),2400)}
 function crest(k,size){size=size||40;const t=TEAMS[k]||{s:'?',c1:'#444',c2:'#222',tx:'#fff'};
  return '<svg width="'+size+'" height="'+size+'" viewBox="0 0 48 48" style="flex-shrink:0;filter:drop-shadow(0 2px 5px rgba(0,0,0,.45))"><path d="M24 2.5 L43.5 8.5 V24 C43.5 35.5 35.8 42.8 24 45.8 C12.2 42.8 4.5 35.5 4.5 24 V8.5 Z" fill="'+t.c2+'" stroke="rgba(255,255,255,.28)" stroke-width="1.4"/><path d="M24 2.5 L43.5 8.5 V24 C43.5 30 41.4 35.3 37.7 39.2 L24 33 Z" fill="'+t.c1+'"/><text x="24" y="27.5" text-anchor="middle" font-size="10.5" font-weight="900" fill="'+t.tx+'" font-family="Cairo,sans-serif">'+t.s+'</text></svg>'}
@@ -533,7 +555,7 @@ function render(){let h;
  else if(S.members[ses])h=viewMember();
  else{ses=null;h=viewLogin()}
  $('app').innerHTML=h;bindFav()}
-(async()=>{await loadState();render();setInterval(async()=>{if(document.hidden)return;try{const r=await fetch(DB_URL);const d=await r.json();if(d)S=d;if(ses&&ses!=='OWNER'&&ses.indexOf('REG:')!==0&&S.members[ses])render()}catch(e){}},25000)})();
+(async()=>{await loadState();render();setInterval(async()=>{if(document.hidden)return;try{const snap=await withTimeout(_db.collection('ucl26').doc('state').get(),12000);if(snap.exists)S=snap.data();if(ses&&ses!=='OWNER'&&ses.indexOf('REG:')!==0&&S.members[ses])render()}catch(e){}},25000)})();
 </script>
 </body>
 </html>
