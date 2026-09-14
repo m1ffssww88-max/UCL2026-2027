@@ -1039,18 +1039,23 @@ function teamSel(id,cur){return '<select id="'+id+'" class="inp"><option value="
 async function fetchCrests(){
  toast('جارٍ جلب شعارات الأندية الحقيقية...');
  try{
-  const r=await withTimeout(fetch('https://api.football-data.org/v4/competitions/CL/teams',{headers:{'X-Auth-Token':FD_TOKEN}}),15000);
-  if(!r.ok)throw new Error('HTTP '+r.status);
-  const d=await r.json();const teams=d.teams||[];
+  // نستخدم نفس رابط "المباريات" المستخدم بمزامنة النتائج (مضمون يشتغل) بدل رابط "teams" المنفصل الذي قد يكون مقيّداً ببعض الخطط
+  const r=await withTimeout(fetch('https://api.football-data.org/v4/competitions/CL/matches',{headers:{'X-Auth-Token':FD_TOKEN}}),15000);
+  const bodyTxt=await r.text();
+  if(!r.ok){alert('فشل جلب الشعارات — HTTP '+r.status+'\n\nرد المصدر:\n'+bodyTxt.slice(0,300));return}
+  let d;try{d=JSON.parse(bodyTxt)}catch(e){alert('رد غير متوقع من المصدر:\n'+bodyTxt.slice(0,300));return}
+  const matches=d.matches||[];
+  const teamsFound=[];
+  matches.forEach(m=>{[m.homeTeam,m.awayTeam].forEach(t=>{if(t&&t.crest&&!teamsFound.some(x=>x.id===t.id))teamsFound.push(t)})});
   if(!S.crests)S.crests={};
-  let n=0;
+  let n=0;const missing=[];
   Object.keys(TEAMS).forEach(code=>{
-   const t=teams.find(x=>matchTeam(code,x.name,x.shortName));
-   if(t&&t.crest){S.crests[code]=t.crest;n++}
+   const t=teamsFound.find(x=>matchTeam(code,x.name,x.shortName));
+   if(t&&t.crest){S.crests[code]=t.crest;n++}else missing.push(tname(code));
   });
   await sync();render();
-  toast('تم جلب '+n+' شعار من أصل '+Object.keys(TEAMS).length+' — إذا نقص أحد، حدّث لاحقاً')
- }catch(e){toast('تعذّر جلب الشعارات — تحقق من الإنترنت')}
+  toast('تم جلب '+n+' شعار من أصل '+Object.keys(TEAMS).length+(missing.length?(' — ناقص: '+missing.slice(0,5).join('، ')+(missing.length>5?'...':'')):''))
+ }catch(e){alert('تعذّر الاتصال أثناء جلب الشعارات:\n'+e.message)}
 }
 /* ============ الحسابات ============ */
 function mpts(p,r){if(!r)return null;if(p.h===r.h&&p.a===r.a)return 3;return Math.sign(p.h-p.a)===Math.sign(r.h-r.a)?1:0}
@@ -1170,15 +1175,20 @@ function buy(pid){const m=S.members[ses];if((m.squad||[]).length>=5){toast('ال
  const c=posCounts(m);if((c[p.pos]||0)>=FORMATION[p.pos]){toast('اكتمل عدد '+POS_AR[p.pos]+' المسموح ('+FORMATION[p.pos]+') — التشكيلة الثابتة: حارس 1، مدافع 1، وسط 1، مهاجمين 2');return}
  m.squad.push({pid,buy:p.price});sync().then(()=>{render();toast('انضم '+p.name+' لتشكيلتك')})}
 function sell(i){const m=S.members[ses];const sl=m.squad[i];if(!sl)return;m.squad.splice(i,1);sync().then(()=>{render();toast('تم البيع')})}
+let showAllPlayers=false;
+function ownedCounts(){const c={};for(const code in S.members){(S.members[code].squad||[]).forEach(sl=>{c[sl.pid]=(c[sl.pid]||0)+1})}return c}
 function viewFantasyAdmin(){
  let out='<h3 class="sec">إضافة لاعب جديد للسوق</h3><div class="card"><div class="row" style="flex-wrap:wrap">'
  +'<input id="npname" class="inp" style="flex:2;min-width:140px" placeholder="اسم اللاعب">'
  +'<select id="npteam" class="inp" style="flex:1;min-width:110px">'+TDATA.map(t=>'<option value="'+t[0]+'">'+t[1]+'</option>').join('')+'</select>'
  +'<select id="nppos" class="inp" style="flex:1;min-width:90px"><option value="FWD">مهاجم</option><option value="MID">وسط</option><option value="DEF">مدافع</option><option value="GK">حارس</option></select>'
  +'<input id="npprice" type="number" step="0.5" min="5" max="25" value="10" class="inp" style="width:90px"><button class="btn sm" onclick="addPlayer()">إضافة</button></div></div>';
+ const oc=ownedCounts();
+ const perfPool=Object.entries(S.players).filter(([id])=>showAllPlayers||oc[id]).sort((a,b)=>(oc[b[0]]||0)-(oc[a[0]]||0));
  out+='<h3 class="sec">تسجيل أداء جولة (تحتسب النقاط وتُحدّث الأسعار تلقائياً)</h3><div class="card">'
+ +'<div class="mut2" style="margin-bottom:8px">القائمة تعرض تلقائياً بس اللاعبين المملوكين فعلاً بتشكيلات الأعضاء ('+Object.keys(oc).length+' من '+Object.keys(S.players).length+') — هذا يوفر عليك إدخال أداء لاعبين محد يملكهم. <label style="margin-inline-start:8px"><input type="checkbox" '+(showAllPlayers?'checked':'')+' onchange="showAllPlayers=this.checked;render()"> إظهار كل اللاعبين</label></div>'
  +'<div class="row" style="flex-wrap:wrap"><select id="apround" class="inp" style="width:120px">'+Array.from({length:8},(_,i)=>'<option value="'+(i+1)+'">الجولة '+(i+1)+'</option>').join('')+'</select>'
- +'<select id="appid" class="inp" style="flex:2;min-width:160px"><option value="">— اختر اللاعب —</option>'+Object.entries(S.players).map(([id,p])=>'<option value="'+id+'">'+p.name+' · '+tname(p.team)+' · '+p.price.toFixed(1)+'M</option>').join('')+'</select></div>'
+ +'<select id="appid" class="inp" style="flex:2;min-width:160px"><option value="">— اختر اللاعب —</option>'+perfPool.map(([id,p])=>'<option value="'+id+'">'+p.name+' · '+tname(p.team)+' · '+p.price.toFixed(1)+'M'+(oc[id]?' · يملكه '+oc[id]+' عضو':'')+'</option>').join('')+'</select></div>'
  +'<div class="statgrid">'
  +[['min','دقائق اللعب','90'],['g','أهداف','0'],['a','صناعة أهداف','0'],['sv','تصديات (حارس)','0'],['yc','بطاقات صفراء','0'],['rc','بطاقات حمراء','0'],['og','أهداف عكسية','0'],['pm','ركلات جزاء ضائعة','0']]
   .map(x=>'<div><label>'+x[1]+'</label><input id="st_'+x[0]+'" type="number" min="0" class="inp" value="'+x[2]+'"></div>').join('')
